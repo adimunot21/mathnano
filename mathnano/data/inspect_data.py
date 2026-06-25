@@ -71,7 +71,7 @@ def inspect_mathpile(input_dir: str) -> None:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            sub = obj.get("SubSet", "?")
+            sub = obj.get("subset", "?")
             by_subset[sub] = by_subset.get(sub, 0) + 1
             text = obj.get("text", "")
             lengths.append(len(text))

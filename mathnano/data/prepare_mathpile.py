@@ -34,8 +34,9 @@ CONFIG = {
     "docs_per_shard": 20_000,      # ~ matches nanochat shard granularity
     "min_doc_chars": 200,          # drop near-empty docs (arXiv preambles etc.)
     "max_doc_chars": 100_000,      # truncate pathological giant docs
-    # Optional per-SubSet weighting (None = keep all). e.g. downweight raw web text.
-    "subset_filter": None,         # e.g. {"arXiv","Textbooks","StackExchange","ProofWiki","Wikipedia"}
+    # Optional per-subset filter (None = keep all). MathPile `subset` values (verified):
+    # {"arXiv","CommonCrawl","ProofWiki","StackExchange","Textbooks","Wikipedia"}.
+    "subset_filter": None,
 }
 
 
@@ -65,7 +66,7 @@ def iter_mathpile_docs(input_dir: str) -> Iterator[str]:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if keep is not None and obj.get("SubSet") not in keep:
+                if keep is not None and obj.get("subset") not in keep:
                     continue
                 text = (obj.get("text") or "").strip()
                 if len(text) < CONFIG["min_doc_chars"]:
@@ -128,8 +129,8 @@ def _self_test() -> None:
         with gzip.open(os.path.join(raw, "part.jsonl.gz"), "wt", encoding="utf-8") as f:
             for i in range(50):
                 f.write(json.dumps({"text": f"Theorem {i}. " + "x" * 500,
-                                    "SubSet": "arXiv"}) + "\n")
-            f.write(json.dumps({"text": "too short", "SubSet": "arXiv"}) + "\n")  # dropped
+                                    "subset": "arXiv"}) + "\n")
+            f.write(json.dumps({"text": "too short", "subset": "arXiv"}) + "\n")  # dropped
 
         out = os.path.join(tmp, "shards")
         CONFIG["docs_per_shard"] = 20  # force multiple shards

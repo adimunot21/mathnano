@@ -32,13 +32,16 @@ Re-run `python -m mathnano.data.inspect_data` to refresh.
 - Fields: `problem: str`, `generated_solution: str` (CoT by Llama-3.1-405B), `expected_answer: str`,
   `problem_source: str` (e.g. `augmented_gsm8k`, `augmented_math`).
 
-## GAIR/MathPile  — pretraining (Track A)  — GATED, NOT yet inspected here
+## GAIR/MathPile  — pretraining (Track A)  — GATED, schema VERIFIED 2026-06-25
 - Source: gated, CC BY-NC-SA 4.0 (non-commercial). Accept license + `huggingface-cli login`,
   then **`huggingface-cli download GAIR/MathPile --repo-type dataset --local-dir <dir>`**
   (not `load_dataset`). Files are **jsonl.gz**.
-- Expected fields (from dataset card; **verify on first download**): `text: str`,
-  `SubSet: str` (one of arXiv, Textbooks, Wikipedia, ProofWiki, StackExchange, CommonCrawl),
-  plus metadata (language scores, idx). ~9.5B tokens total.
+- Layout: `train/<source>/*.jsonl.gz` and `validation/<source>/*.jsonl.gz`; sources =
+  arXiv, commoncrawl, proofwiki, stackexchange, textbooks, wikipedia (41 jsonl.gz total).
+- **Verified fields** (inspected `validation/proofwiki/...`): `text: str`,
+  **`subset: str`** (lowercase key! values like `"ProofWiki"`, `"arXiv"`, `"CommonCrawl"`),
+  `meta: str` (a stringified dict, e.g. `{'type': 'Definition'}`). ~9.5B tokens total.
+  NOTE: the field is `subset`, NOT `SubSet` as the dataset card implies — our scripts use `subset`.
 - Our use: stream `text`, optionally filter/weight by `SubSet`, write **text parquet shards**
   (`shard_NNNNN.parquet`, single `text` column) into `$NANOCHAT_BASE_DIR/base_data_climbmix/`,
   last shard reserved as val. Subset to a Chinchilla-aware budget (depth=16 ⇒ ~2.4B tokens at the
