@@ -6,15 +6,21 @@ validation split. There is no ``.bin`` step. So our job: stream MathPile documen
 out as text parquet shards, capped to a Chinchilla-aware token budget, with the final shard held
 out for validation.
 
-MathPile (``GAIR/MathPile``) is gated + non-commercial. Download it yourself first::
+Two quality decisions:
+  * **Source-balanced sampling.** MathPile is ~85% arXiv. Reading files in order would make the
+    token budget almost all arXiv. We round-robin across sources (arXiv, textbooks, proofwiki,
+    stackexchange, wikipedia, commoncrawl) so a 200M model sees a balanced diet of notation
+    fluency (arXiv) and clean step-by-step reasoning (textbooks/stackexchange/proofwiki).
+  * **Real held-out val.** MathPile ships a ``validation/`` split; we make that nanochat's last
+    shard (its val) instead of slicing val out of train.
 
-    huggingface-cli login
+MathPile (``GAIR/MathPile``) is gated + non-commercial. Download it first::
+
     huggingface-cli download GAIR/MathPile --repo-type dataset --local-dir data/raw/mathpile
 
-then point this script at that dir. Files are ``*.jsonl.gz`` with fields ``text`` and ``SubSet``.
-
-Budget: depth=16 (~200M scaling params) is compute-optimal around 2.4B tokens (nanochat's default
-12 tokens/param) to ~4B (Chinchilla 20). We size by characters using ~4 chars/token.
+Files are ``train/<source>/*.jsonl.gz`` and ``validation/<source>/*.jsonl.gz`` with fields
+``text`` and ``subset`` (lowercase). Budget by characters using ~4 chars/token; depth=16 is
+compute-optimal around 2.4B (nanochat default 12 tok/param) to ~4B (Chinchilla 20).
 
 Usage:
     python -m mathnano.data.prepare_mathpile --input data/raw/mathpile --target-tokens 4e9
@@ -34,6 +40,7 @@ CONFIG = {
     "docs_per_shard": 20_000,      # ~ matches nanochat shard granularity
     "min_doc_chars": 200,          # drop near-empty docs (arXiv preambles etc.)
     "max_doc_chars": 100_000,      # truncate pathological giant docs
+    "val_tokens": 20_000_000,      # ~20M-token validation shard (the final shard)
     # Optional per-subset filter (None = keep all). MathPile `subset` values (verified):
     # {"arXiv","CommonCrawl","ProofWiki","StackExchange","Textbooks","Wikipedia"}.
     "subset_filter": None,
@@ -47,112 +54,155 @@ def _base_data_dir() -> str:
     return os.path.join(base, "base_data_climbmix")
 
 
-def iter_mathpile_docs(input_dir: str) -> Iterator[str]:
-    """Yield cleaned `text` strings from all MathPile *.jsonl.gz under input_dir."""
+def _discover(input_dir: str) -> tuple[list[str], list[str]]:
+    """Return (train_files, val_files). MathPile uses train/ and validation/ subdirs."""
     files = sorted(glob.glob(os.path.join(input_dir, "**", "*.jsonl.gz"), recursive=True))
     if not files:
         files = sorted(glob.glob(os.path.join(input_dir, "**", "*.jsonl"), recursive=True))
     if not files:
         raise SystemExit(f"No .jsonl(.gz) files found under {input_dir}")
+    train = [f for f in files if os.sep + "validation" + os.sep not in f]
+    val = [f for f in files if os.sep + "validation" + os.sep in f]
+    return train, val
+
+
+def _docs_from_file(fp: str) -> Iterator[str]:
+    """Yield cleaned `text` from one jsonl(.gz) file, applying filters."""
     keep = CONFIG["subset_filter"]
+    opener = gzip.open if fp.endswith(".gz") else open
+    with opener(fp, "rt", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if keep is not None and obj.get("subset") not in keep:
+                continue
+            text = (obj.get("text") or "").strip()
+            if len(text) < CONFIG["min_doc_chars"]:
+                continue
+            yield text[: CONFIG["max_doc_chars"]]
+
+
+def _source_of(fp: str) -> str:
+    """Source = the directory name holding the file (arXiv, textbooks, ...)."""
+    return os.path.basename(os.path.dirname(fp))
+
+
+def iter_balanced(files: list[str]) -> Iterator[str]:
+    """Round-robin documents across sources so no single source dominates the budget."""
+    by_source: dict[str, list[str]] = {}
     for fp in files:
-        opener = gzip.open if fp.endswith(".gz") else open
-        with opener(fp, "rt", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if keep is not None and obj.get("subset") not in keep:
-                    continue
-                text = (obj.get("text") or "").strip()
-                if len(text) < CONFIG["min_doc_chars"]:
-                    continue
-                yield text[: CONFIG["max_doc_chars"]]
+        by_source.setdefault(_source_of(fp), []).append(fp)
+    # one chained generator per source
+    gens = {src: _chain(fps) for src, fps in by_source.items()}
+    active = list(gens)
+    while active:
+        for src in list(active):
+            try:
+                yield next(gens[src])
+            except StopIteration:
+                active.remove(src)
 
 
-def write_shards(docs: Iterator[str], out_dir: str, target_tokens: float) -> dict:
-    """Write `docs` to shard_NNNNN.parquet (text column) until the token budget is hit.
+def _chain(files: list[str]) -> Iterator[str]:
+    for fp in files:
+        yield from _docs_from_file(fp)
 
-    Returns stats. The caller is responsible for ensuring ≥2 shards exist so nanochat has a
-    train split (all-but-last) and a val split (last shard).
-    """
+
+def _write_one_shard(rows: list[str], out_dir: str, idx: int) -> None:
     import pyarrow as pa
     import pyarrow.parquet as pq
+    path = os.path.join(out_dir, f"shard_{idx:05d}.parquet")
+    pq.write_table(pa.table({"text": rows}), path)
+    print(f"  wrote {path}  ({len(rows):,} docs)")
 
+
+def write_shards(docs: Iterator[str], out_dir: str, target_tokens: float,
+                 start_index: int = 0) -> dict:
+    """Write `docs` to shard_{i}.parquet (text column) from `start_index` until the budget hits."""
     os.makedirs(out_dir, exist_ok=True)
     target_chars = target_tokens * CONFIG["chars_per_token"]
     buf: list[str] = []
-    shard_idx = total_chars = total_docs = 0
-
-    def flush(idx: int, rows: list[str]) -> None:
-        path = os.path.join(out_dir, f"shard_{idx:05d}.parquet")
-        table = pa.table({"text": rows})
-        pq.write_table(table, path)
-        print(f"  wrote {path}  ({len(rows):,} docs)")
-
+    idx = start_index
+    total_chars = total_docs = 0
     for text in docs:
         buf.append(text)
         total_chars += len(text)
         total_docs += 1
         if len(buf) >= CONFIG["docs_per_shard"]:
-            flush(shard_idx, buf)
-            shard_idx += 1
-            buf = []
+            _write_one_shard(buf, out_dir, idx); idx += 1; buf = []
         if total_chars >= target_chars:
             break
     if buf:
-        flush(shard_idx, buf)
-        shard_idx += 1
+        _write_one_shard(buf, out_dir, idx); idx += 1
+    return {"next_index": idx, "shards": idx - start_index, "docs": total_docs,
+            "chars": total_chars, "approx_tokens": int(total_chars / CONFIG["chars_per_token"])}
 
-    return {
-        "shards": shard_idx,
-        "docs": total_docs,
-        "chars": total_chars,
-        "approx_tokens": int(total_chars / CONFIG["chars_per_token"]),
-        "out_dir": out_dir,
-    }
+
+def _write_val_shard(docs: Iterator[str], out_dir: str, idx: int, target_tokens: float) -> int:
+    """Write a SINGLE final shard for validation (nanochat uses only the last shard as val)."""
+    target_chars = target_tokens * CONFIG["chars_per_token"]
+    rows, chars = [], 0
+    for text in docs:
+        rows.append(text); chars += len(text)
+        if chars >= target_chars:
+            break
+    if rows:
+        _write_one_shard(rows, out_dir, idx)
+        print(f"  (val shard: {len(rows):,} docs, ~{int(chars/CONFIG['chars_per_token']):,} tokens)")
+        return idx + 1
+    return idx
 
 
 def _self_test() -> None:
-    """Verify the sharding round-trips, with synthetic data (no MathPile needed)."""
+    """Verify sharding + balancing round-trips with synthetic data (no MathPile needed)."""
     import tempfile
     import pyarrow.parquet as pq
 
     with tempfile.TemporaryDirectory() as tmp:
-        # fake input: one jsonl.gz with a few docs across SubSets
-        raw = os.path.join(tmp, "raw")
-        os.makedirs(raw)
-        with gzip.open(os.path.join(raw, "part.jsonl.gz"), "wt", encoding="utf-8") as f:
-            for i in range(50):
-                f.write(json.dumps({"text": f"Theorem {i}. " + "x" * 500,
-                                    "subset": "arXiv"}) + "\n")
-            f.write(json.dumps({"text": "too short", "subset": "arXiv"}) + "\n")  # dropped
+        # synthetic: two sources under train/, one under validation/
+        for src, n in [("arXiv", 60), ("textbooks", 30)]:
+            d = os.path.join(tmp, "raw", "train", src); os.makedirs(d)
+            with gzip.open(os.path.join(d, "p.jsonl.gz"), "wt", encoding="utf-8") as f:
+                for i in range(n):
+                    f.write(json.dumps({"text": f"{src} doc {i} " + "x" * 400,
+                                        "subset": src}) + "\n")
+        vd = os.path.join(tmp, "raw", "validation", "arXiv"); os.makedirs(vd)
+        with gzip.open(os.path.join(vd, "v.jsonl.gz"), "wt", encoding="utf-8") as f:
+            for i in range(10):
+                f.write(json.dumps({"text": f"val doc {i} " + "x" * 400, "subset": "arXiv"}) + "\n")
 
         out = os.path.join(tmp, "shards")
-        CONFIG["docs_per_shard"] = 20  # force multiple shards
-        stats = write_shards(iter_mathpile_docs(raw), out, target_tokens=1e9)
+        CONFIG["docs_per_shard"] = 25
+        train_files, val_files = _discover(os.path.join(tmp, "raw"))
+        assert len(train_files) == 2 and len(val_files) == 1
 
+        # balanced order: first ~ docs should alternate arXiv/textbooks
+        order = [t.split()[0] for t in iter_balanced(train_files)]
+        assert order[:4] == ["arXiv", "textbooks", "arXiv", "textbooks"], order[:4]
+
+        st = write_shards(iter_balanced(train_files), out, target_tokens=1e9)
+        nxt = _write_val_shard(iter_balanced(val_files), out, st["next_index"], 1e9)
         files = sorted(glob.glob(os.path.join(out, "*.parquet")))
-        assert len(files) == stats["shards"] >= 2, "need >=2 shards (train + val)"
-        # round-trip: every shard has a single 'text' column, no empties
-        ndocs = 0
-        for fp in files:
-            t = pq.read_table(fp)
-            assert t.column_names == ["text"], t.column_names
-            ndocs += t.num_rows
-        assert ndocs == 50, f"expected 50 kept docs, got {ndocs}"  # the short one dropped
-        print(f"  self-test OK: {len(files)} shards, {ndocs} docs, "
-              f"~{stats['approx_tokens']:,} tokens, cols=['text']")
+        assert len(files) == nxt >= 2, files
+        # last shard is the val shard
+        last = pq.read_table(files[-1])
+        assert last.column_names == ["text"] and last.num_rows == 10
+        # train shards hold the 90 train docs
+        train_docs = sum(pq.read_table(f).num_rows for f in files[:-1])
+        assert train_docs == 90, train_docs
+        print(f"  self-test OK: {len(files)} shards (last=val, {last.num_rows} docs), "
+              f"{train_docs} train docs, balanced order verified")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="MathPile -> nanochat text parquet shards")
-    ap.add_argument("--input", type=str, help="dir with MathPile *.jsonl.gz")
-    ap.add_argument("--target-tokens", type=float, default=4e9, help="approx token budget")
+    ap.add_argument("--input", type=str, help="dir with MathPile train/ + validation/")
+    ap.add_argument("--target-tokens", type=float, default=4e9, help="approx TRAIN token budget")
     ap.add_argument("--out", type=str, default=None,
                     help="output dir (default: $NANOCHAT_BASE_DIR/base_data_climbmix)")
     ap.add_argument("--self-test", action="store_true", help="run synthetic round-trip test")
@@ -165,12 +215,22 @@ def main() -> None:
         raise SystemExit("--input is required (or use --self-test)")
 
     out_dir = args.out or _base_data_dir()
-    print(f"Sharding MathPile from {args.input} -> {out_dir} "
-          f"(target ~{args.target_tokens:.2g} tokens)")
-    stats = write_shards(iter_mathpile_docs(args.input), out_dir, args.target_tokens)
-    print(f"\nDone: {stats['shards']} shards, {stats['docs']:,} docs, "
-          f"~{stats['approx_tokens']:,} tokens in {stats['out_dir']}")
-    if stats["shards"] < 2:
+    train_files, val_files = _discover(args.input)
+    print(f"Sharding MathPile from {args.input} -> {out_dir}")
+    print(f"  sources: {sorted({_source_of(f) for f in train_files})}")
+    print(f"  train files: {len(train_files)}  val files: {len(val_files)}  "
+          f"(target ~{args.target_tokens:.2g} train tokens)")
+
+    st = write_shards(iter_balanced(train_files), out_dir, args.target_tokens)
+    next_idx = st["next_index"]
+    if val_files:
+        next_idx = _write_val_shard(iter_balanced(val_files), out_dir, next_idx,
+                                    CONFIG["val_tokens"])
+    else:
+        print("  WARNING: no validation/ files — nanochat will use the last TRAIN shard as val.")
+
+    print(f"\nDone: {next_idx} shards total, ~{st['approx_tokens']:,} train tokens in {out_dir}")
+    if next_idx < 2:
         print("WARNING: <2 shards — nanochat needs >=2 (train=all-but-last, val=last).")
 
 
