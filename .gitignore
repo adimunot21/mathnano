@@ -17,7 +17,10 @@ venv/
 *.log
 
 # --- Large artifacts (never tracked) ---
-data/
+# NOTE: root-anchored so it does NOT swallow the source pkg mathnano/data/
+/data/
+**/processed/
+**/raw/
 checkpoints/*.pt
 *.parquet
 *.bin
