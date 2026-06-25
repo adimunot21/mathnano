@@ -1,0 +1,6 @@
+karpathy/nanochat pinned commit (cloned 2026-06-25)
+dc54a1a3077cab11d68fac4c5d1cd5c51f5d8c7a
+
+Reproduce:
+  git clone https://github.com/karpathy/nanochat.git
+  git -C nanochat checkout dc54a1a3077cab11d68fac4c5d1cd5c51f5d8c7a

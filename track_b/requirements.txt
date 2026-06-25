@@ -1,0 +1,19 @@
+# Track B — capable product model: SFT + GRPO on a small pretrained base (Qwen2.5).
+#
+# This stack (transformers + trl + vllm + peft) is version-sensitive: vLLM pins a
+# specific transformers/torch range, and TRL's GRPOTrainer<->vLLM integration changes
+# between releases. Treat these pins as a SET — bump them together, and re-run the
+# Track B SFT 50-step smoke test after any change.
+#
+# VRAM target: single RTX 4090 (24 GB) via LoRA + 4-bit base + vLLM-backed rollouts.
+
+torch==2.5.1
+transformers==4.48.0
+trl==0.13.0
+peft==0.14.0
+accelerate==1.2.1
+datasets==3.2.0
+vllm==0.6.6.post1
+bitsandbytes==0.45.0
+# Unsloth is an optional, faster single-GPU path; enable if the TRL+vLLM combo is tight on 24 GB:
+# unsloth==2025.1.5

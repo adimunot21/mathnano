@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+
+# --- Secrets / env ---
+.env
+*.log
+
+# --- Large artifacts (never tracked) ---
+data/
+checkpoints/*.pt
+*.parquet
+*.bin
+*.gz
+*.safetensors
+*.pt
+
+# --- nanochat: upstream base codebase, not vendored here (pinned in NANOCHAT_VERSION.txt) ---
+nanochat/
+.nanochat/
+base_data*/
+
+# --- our run outputs ---
+experiments/runs/
+experiments/logs/*.log
+track_b/outputs/
+serve/_local_model/
+
+# Keep nanochat source tracked, but not its downloaded data/checkpoints

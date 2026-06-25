@@ -1,0 +1,31 @@
+# MathNano — shared dependencies (data pipeline, evaluation, product serving).
+#
+# nanochat itself is installed separately and brings its own pinned stack
+# (PyTorch, etc.) via its pyproject:  pip install -e nanochat/
+# The heavier / version-sensitive GRPO stack for Track B (trl, vllm, peft) lives
+# in track_b/requirements.txt so a fragile pin there cannot break the shared env.
+#
+# Pins below are the versions this project was developed against. Re-verify on a
+# fresh pod (`pip install -r requirements.txt`) before any paid GPU run.
+
+# --- Data pipeline ---
+datasets==3.2.0
+huggingface_hub==0.27.1
+pyarrow==18.1.0
+pandas==2.2.3
+zstandard==0.23.0        # MathPile shards may be .gz/.zst
+tqdm==4.67.1
+
+# --- Evaluation / analysis ---
+numpy==2.1.3
+matplotlib==3.10.0
+sympy==1.13.3            # robust symbolic answer-equivalence in the reward/eval
+
+# --- Product: inference API + UI ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sse-starlette==2.2.1
+pydantic==2.10.4
+
+# --- Dev / tests ---
+pytest==8.3.4
