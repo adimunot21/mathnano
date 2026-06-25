@@ -1,61 +1,80 @@
-# MathNano — Runbook (turnkey execution order)
+# MathNano — Runbook (verified on a RunPod RTX 4090, 2026-06-26)
 
-Everything offline-buildable is done and tested (74 passing tests). This runbook sequences the
-remaining GPU/gated steps with concrete, verified commands. Tracks A and B are independent — you
-can do B (the product) first if budget is tight.
+Turnkey execution order. Commands below are the ones that actually ran on the pod (corrected for
+real-world gotchas: `hf` not `huggingface-cli`, plain `python` not `torchrun` on one GPU,
+`--window-pattern=L` for the SDPA fallback). Tracks A and B are independent.
 
-Legend: 🖥️ local/CPU · 🟢 GPU pod · 🔑 needs your HF token · 💸 costs money
+Legend: 🖥️ local/CPU · 🟢 GPU pod · 🔑 needs HF token · 💸 costs money
 
 ---
 
-## 0. One-time
-- 🖥️ `conda create -n mathnano python=3.11 && conda activate mathnano && pip install -r requirements.txt`
-- 🔑 `huggingface-cli login` ; accept the MathPile license at huggingface.co/datasets/GAIR/MathPile.
-- 🟢 On the RunPod RTX 4090 pod: `pip install -e nanochat/ && pip install -r requirements.txt`
-  (Track B also: `pip install -r track_b/requirements.txt`). `git checkout` the pinned nanochat
-  commit in `NANOCHAT_VERSION.txt`.
-- 🟢 `export NANOCHAT_BASE_DIR=/workspace/nanochat_base`
-
-## 1. Data (🖥️ CPU, mostly free)
+## 0. Pod setup (🟢)
 ```bash
-# Inspect everything first (sanity):
-python -m mathnano.data.inspect_data            # public sources
-# GRPO + SFT sets (public; OMI subset streams):
-python -m mathnano.data.prepare_grpo            # -> data/processed/grpo_problems.jsonl
-python -m mathnano.data.prepare_sft             # -> data/processed/sft_combined.jsonl
-# MathPile (🔑 gated, ~50GB) -> nanochat text shards:
-huggingface-cli download GAIR/MathPile --repo-type dataset --local-dir data/raw/mathpile
-python -m mathnano.data.prepare_mathpile --input data/raw/mathpile --target-tokens 4e9
-python -m mathnano.data.inspect_data --mathpile-dir data/raw/mathpile   # verify SubSet/text
+# keep ALL heavy data on the persistent network volume
+export HF_HOME=/workspace/hf_cache
+export NANOCHAT_BASE_DIR=/workspace/nanochat_base
+export HF_HUB_DISABLE_XET=1            # avoid an hf_xet shutdown segfault on CPU data jobs
+mkdir -p "$HF_HOME" "$NANOCHAT_BASE_DIR"
+
+cd /workspace
+git clone https://github.com/adimunot21/mathnano.git && cd mathnano
+git clone https://github.com/karpathy/nanochat.git
+git -C nanochat checkout $(sed -n 2p NANOCHAT_VERSION.txt)
+
+# nanochat is NOT pip-installable (-e fails on its flat layout) — install its deps directly and
+# run scripts FROM the nanochat dir. This also upgrades torch to nanochat's pinned 2.9.1.
+pip install "torch==2.9.1" "datasets>=4.0.0" "fastapi>=0.117.1" "kernels>=0.11.7" \
+  "psutil>=7.1.0" "rustbpe>=0.1.0" "tiktoken>=0.11.0" "tokenizers>=0.22.0" \
+  "uvicorn>=0.36.0" "wandb>=0.21.3"
+pip install -r requirements.txt                     # our data/eval/serve deps
+hf auth login                                       # 🔑 paste token; accept MathPile license online
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"   # expect 2.9.1 / True
+```
+
+## 1. Data (🖥️ CPU on the pod; free)
+```bash
+# MathPile (🔑 gated). Big arXiv chunks; lands on the volume.
+hf download GAIR/MathPile --repo-type dataset --local-dir /workspace/mathpile_raw
+# SFT + GRPO sets (public; OMI subset streams). Run in a separate tmux window.
+cd /workspace/mathnano
+python -m mathnano.data.prepare_grpo      # -> data/processed/grpo_problems.jsonl  (~19.5k)
+python -m mathnano.data.prepare_sft       # -> data/processed/sft_combined.jsonl   (~119k)
 ```
 
 ## 2. Track A — nanochat from scratch (🟢💸 the learning artifact)
 ```bash
-# Tokenizer on MathPile text shards (vocab 32768):
+# shard MathPile -> balanced text parquet shards (last = val), then train tokenizer
+python -m mathnano.data.prepare_mathpile --input /workspace/mathpile_raw --target-tokens 2.5e9
+cd /workspace/mathnano/nanochat
 python -m scripts.tok_train --vocab-size=32768
-# Smoke (must see loss ~10.4 -> decreasing before paying for the real run):
-torchrun --standalone --nproc_per_node=1 -m scripts.base_train \
-  --depth=8 --device-batch-size=4 --num-iterations=20 --core-metric-every=-1
-# Pretrain depth=16 (fallback 12 if budget). device-batch-size=4 ~17GB on a 4090:
-torchrun --standalone --nproc_per_node=1 -m scripts.base_train \
-  --depth=16 --device-batch-size=4 --save-every=1000 --model-tag=d16-mathpile
-#   resume after preemption: add --resume-from-step=N
-#   push checkpoints to HF every <=30 min (separate loop; nanochat has no built-in push).
-# SFT then GRPO (GRPO is built-in on GSM8K; add tasks/math.py to also train on MATH):
-python -m scripts.chat_sft   --model-tag=d16-mathpile ...
-python -m scripts.chat_rl    --model-tag=d16-mathpile ...
+
+# smoke (loss must start ~10.4 and drop): plain python on 1 GPU, NO torchrun
+python -m scripts.base_train --depth=8 --device-batch-size=4 --total-batch-size=8192 \
+  --num-iterations=20 --eval-every=-1 --core-metric-every=-1 --sample-every=-1 --run=dummy
+
+# real pretrain in tmux. --window-pattern=L is REQUIRED on the 4090 (SDPA has no sliding window;
+# with L we got 72% MFU, 66k tok/sec, ~11.7h for depth=16 / ~2.82B tokens at $0.70/hr ≈ £6).
+tmux new -s train
+PYTHONUNBUFFERED=1 python -m scripts.base_train --depth=16 --window-pattern=L \
+  --device-batch-size=4 --save-every=500 --core-metric-every=-1 \
+  --model-tag=d16-mathpile --run=dummy 2>&1 | tee /workspace/d16_train.log
+#   resume after preemption: add --resume-from-step=N   (checkpoints persist on the volume)
+
+# then SFT + GRPO (GRPO is built-in on GSM8K; add tasks/math.py to also train on MATH)
+python -m scripts.chat_sft --model-tag=d16-mathpile ...
+python -m scripts.chat_rl  --model-tag=d16-mathpile ...
 ```
-> Track A SFT/RL feed data via nanochat `tasks/` classes, not our JSONL. TODO when on the pod:
-> add `tasks/math.py` (mirror `tasks/gsm8k.py`, `\boxed` answer via our `math_reward`) and mix it
-> into `chat_sft`/`chat_rl`.
 
 ## 3. Track B — Qwen2.5-1.5B SFT + GRPO (🟢💸 the shippable product)
-Base confirmed: **Qwen/Qwen2.5-1.5B**. Stack: `track_b/requirements.txt` (TRL+PEFT+vLLM).
-> `track_b/sft.py` and `track_b/grpo.py` are written **on the pod** so they can be smoke-tested
-> against the exact pinned TRL/vLLM versions (this API is version-fragile — do not write blind).
-> Inputs are ready: `sft_combined.jsonl` (chat, boxed answers) and `grpo_problems.jsonl`
-> (`{problem,answer}`); reward = `mathnano.rewards.math_reward.math_reward`.
-> Plan: LoRA SFT (~1–2h) → GRPO (G=4, vLLM rollouts, KL penalty) → merge/keep adapter.
+```bash
+python -m venv /workspace/venv_b && source /workspace/venv_b/bin/activate
+cd /workspace/mathnano && pip install -r track_b/requirements.txt
+# smoke each step (5 steps) before the full run — see track_b/README.md
+python track_b/sft.py  --max-steps 5  && python track_b/sft.py
+python track_b/grpo.py --sft-adapter track_b/outputs/sft --max-steps 5 \
+  && python track_b/grpo.py --sft-adapter track_b/outputs/sft
+deactivate
+```
 
 ## 4. Evaluate (🟢, cheap) — same harness for both tracks
 ```bash
@@ -63,8 +82,7 @@ python -m mathnano.eval.run_eval --backend dummy --task gsm8k --limit 10     # p
 python -m mathnano.eval.run_eval --task all --backend hf \
   --model Qwen/Qwen2.5-1.5B --adapter track_b/outputs/grpo --limit 500
 ```
-Produces accuracy / per-level / pass@k and a JSON report. Run at each stage (base→SFT→GRPO,
-pretrain→SFT→GRPO) for the headline comparison table; the key signal is **GRPO > SFT**.
+Run at each stage (base→SFT→GRPO) for the comparison table; key signal is **GRPO > SFT**.
 
 ## 5. Serve the product (🖥️ or 🟢)
 ```bash
@@ -74,12 +92,13 @@ MATHNANO_MODEL=Qwen/Qwen2.5-1.5B MATHNANO_ADAPTER=track_b/outputs/grpo \
 ```
 
 ## 6. Ship
-HF model cards (note MathPile non-commercial license), push both models, README comparison
-table + demo, failure analysis. See `PROJECT_PLAN.md` Phase 7.
+HF model cards (note MathPile non-commercial license), push both models, README comparison table +
+demo, failure analysis. See `PROJECT_PLAN.md` Phase 7.
 
 ---
 
-### Budget guardrail
-£25 is tight for both tracks on one 4090. **If it runs low, finish Track B + the product first;**
-shorten Track A (depth=12 or stop pretrain early). Always spot instances; shut pods when idle;
-checkpoint to HF ≤30 min.
+### Cost discipline ($0.70/hr observed)
+Projected total ~£12–15 for both tracks. The lever is **idle time** — shut the pod the moment a
+phase ends, and chain Track B right after Track A. Checkpoints live on the 150 GB network volume,
+so a preempted/stopped pod loses nothing; remount the volume and resume.
+```

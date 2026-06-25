@@ -1,19 +1,20 @@
-# Track B — capable product model: SFT + GRPO on a small pretrained base (Qwen2.5).
+# Track B — capable product model: SFT + GRPO on Qwen2.5-1.5B (the shippable model).
 #
-# This stack (transformers + trl + vllm + peft) is version-sensitive: vLLM pins a
-# specific transformers/torch range, and TRL's GRPOTrainer<->vLLM integration changes
-# between releases. Treat these pins as a SET — bump them together, and re-run the
-# Track B SFT 50-step smoke test after any change.
+# Install in a SEPARATE venv from Track A/nanochat (this stack pins torch 2.5.x; nanochat uses
+# 2.9.x). On the pod:
+#     python -m venv /workspace/venv_b && source /workspace/venv_b/bin/activate
+#     pip install -r track_b/requirements.txt
 #
-# VRAM target: single RTX 4090 (24 GB) via LoRA + 4-bit base + vLLM-backed rollouts.
-
+# IMPORTANT: this stack (transformers + trl + vllm + peft) is version-sensitive and the GRPO<->
+# vLLM single-GPU integration changes between releases. Treat these pins as a SET. On the pod,
+# if pip can't resolve them, bump them together to the latest mutually-compatible versions and
+# re-run the Track B SFT/GRPO 5-step smoke tests. GRPOTrainer requires trl >= 0.14.
 torch==2.5.1
-transformers==4.48.0
-trl==0.13.0
+transformers==4.49.0
+trl==0.16.0                 # GRPOTrainer + assistant_only_loss + vLLM integration
 peft==0.14.0
-accelerate==1.2.1
-datasets==3.2.0
-vllm==0.6.6.post1
-bitsandbytes==0.45.0
-# Unsloth is an optional, faster single-GPU path; enable if the TRL+vLLM combo is tight on 24 GB:
-# unsloth==2025.1.5
+accelerate==1.4.0
+datasets>=3.2.0
+vllm==0.7.3                 # fast rollouts; pairs with torch 2.5.1
+bitsandbytes==0.45.1        # optional 4-bit base
+sympy==1.13.3               # symbolic equivalence in the shared math reward
