@@ -29,3 +29,4 @@ pydantic==2.10.4
 
 # --- Dev / tests ---
 pytest==8.3.4
+httpx==0.28.1            # FastAPI TestClient
