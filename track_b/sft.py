@@ -42,9 +42,6 @@ def main() -> None:
     ap.add_argument("--out", default=CONFIG["out"])
     ap.add_argument("--max-steps", type=int, default=-1, help="cap steps (smoke test)")
     ap.add_argument("--epochs", type=float, default=CONFIG["epochs"])
-    ap.add_argument("--no-assistant-only", action="store_true",
-                    help="train on the full sequence instead of assistant-only (fallback if the "
-                         "chat template lacks {% generation %} markers)")
     args = ap.parse_args()
 
     # Heavy imports inside main so `python track_b/sft.py --help` is instant.
@@ -81,8 +78,9 @@ def main() -> None:
         bf16=True,
         gradient_checkpointing=True,
         packing=False,
-        # Mask the prompt: only learn the assistant's tokens (see --no-assistant-only fallback).
-        assistant_only_loss=not args.no_assistant_only,
+        # NOTE: full-sequence SFT (TRL 0.16's SFTConfig has no assistant_only_loss). For our
+        # focused solver this is fine and GRPO does the heavy lifting on correctness; if SFT eval
+        # underperforms we can add completion-only masking via DataCollatorForCompletionOnlyLM.
         report_to="none",
         seed=CONFIG["seed"],
         model_init_kwargs={"torch_dtype": "bfloat16"},
@@ -95,8 +93,7 @@ def main() -> None:
         peft_config=lora,
         processing_class=tok,
     )
-    print(f"[sft] base={args.base}  examples={len(ds):,}  out={args.out}  "
-          f"assistant_only={cfg.assistant_only_loss}")
+    print(f"[sft] base={args.base}  examples={len(ds):,}  out={args.out}")
     trainer.train()
     trainer.save_model(args.out)          # saves the LoRA adapter
     tok.save_pretrained(args.out)
