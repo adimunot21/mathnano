@@ -42,6 +42,8 @@ def main() -> None:
     ap.add_argument("--out", default=CONFIG["out"])
     ap.add_argument("--max-steps", type=int, default=-1, help="cap steps (smoke test)")
     ap.add_argument("--epochs", type=float, default=CONFIG["epochs"])
+    ap.add_argument("--per-device-batch", type=int, default=CONFIG["per_device_batch"])
+    ap.add_argument("--grad-accum", type=int, default=CONFIG["grad_accum"])
     args = ap.parse_args()
 
     # Heavy imports inside main so `python track_b/sft.py --help` is instant.
@@ -67,8 +69,8 @@ def main() -> None:
         max_length=CONFIG["max_seq_len"],
         num_train_epochs=args.epochs,
         max_steps=args.max_steps,
-        per_device_train_batch_size=CONFIG["per_device_batch"],
-        gradient_accumulation_steps=CONFIG["grad_accum"],
+        per_device_train_batch_size=args.per_device_batch,
+        gradient_accumulation_steps=args.grad_accum,
         learning_rate=CONFIG["lr"],
         lr_scheduler_type="cosine",
         warmup_ratio=CONFIG["warmup_ratio"],
