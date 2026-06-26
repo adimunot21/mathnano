@@ -1,20 +1,23 @@
 # Track B — capable product model: SFT + GRPO on Qwen2.5-1.5B (the shippable model).
 #
 # Install in a SEPARATE venv from Track A/nanochat (this stack pins torch 2.5.x; nanochat uses
-# 2.9.x). On the pod:
-#     python -m venv /workspace/venv_b && source /workspace/venv_b/bin/activate
+# 2.9.x). IMPORTANT: create the venv on the pod's LOCAL disk, NOT the network volume — installing
+# thousands of small package files to a network FS (/workspace on RunPod) takes ~20 min/hangs.
+#     python -m venv /root/venv_b && source /root/venv_b/bin/activate
 #     pip install -r track_b/requirements.txt
 #
-# IMPORTANT: this stack (transformers + trl + vllm + peft) is version-sensitive and the GRPO<->
-# vLLM single-GPU integration changes between releases. Treat these pins as a SET. On the pod,
-# if pip can't resolve them, bump them together to the latest mutually-compatible versions and
-# re-run the Track B SFT/GRPO 5-step smoke tests. GRPOTrainer requires trl >= 0.14.
+# Versions are a SET (transformers+trl+peft+accelerate). If pip can't resolve, bump together and
+# re-run the 5-step smokes. GRPOTrainer requires trl >= 0.14. NOTE: torch 2.5.1 pins sympy==1.13.1.
+
+# --- Core: SFT + eval + the shared reward (no vLLM needed) ---
 torch==2.5.1
 transformers==4.49.0
 trl==0.16.0                 # GRPOTrainer + assistant_only_loss + vLLM integration
 peft==0.14.0
 accelerate==1.4.0
 datasets>=3.2.0
-vllm==0.7.3                 # fast rollouts; pairs with torch 2.5.1
+sympy==1.13.1               # must match torch 2.5.1's pin (was 1.13.3 -> conflict)
 bitsandbytes==0.45.1        # optional 4-bit base
-sympy==1.13.3               # symbolic equivalence in the shared math reward
+
+# --- GRPO rollouts: install ONLY when you reach GRPO (heavy; can be skipped via grpo.py --no-vllm) ---
+# pip install vllm==0.7.3
