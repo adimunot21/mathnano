@@ -55,8 +55,14 @@ serve/      FastAPI inference API + web chat UI + Dockerfile
 nanochat/   upstream base codebase (driven via NANOCHAT_BASE_DIR; not vendored)
 ```
 
+## 📚 The course
+A complete, first-principles course on how LLMs work — taught through this project, with every
+concept tied to the real numbers and bugs from our run: **[docs/course/](docs/course/)**
+(12 chapters, from "what is a language model" through the transformer, the pretrain→SFT→RL recipe,
+evaluation, serving, and an honest reflection on scale).
+
 ## Docs
-`CLAUDE.md` (project brief) · `PROJECT_PLAN.md` · `ARCHITECTURE.md` · `DATASETS.md` · `RUNPOD.md` · `RUNBOOK.md` · `RESULTS.md`.
+`CLAUDE.md` (project brief) · `PROJECT_PLAN.md` · `ARCHITECTURE.md` · `DATASETS.md` · `RUNPOD.md` · `RUNBOOK.md` · `RESULTS.md` · `docs/course/`.
 
 ## License / data
 Code: MIT. The Track-A model is trained on **MathPile (CC BY-NC-SA 4.0, non-commercial)** and inherits that restriction. Track-B builds on Qwen2.5 (see its license). Research/portfolio project.
