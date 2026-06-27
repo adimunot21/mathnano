@@ -24,6 +24,10 @@ class HFGenerator:
         self.tok = AutoTokenizer.from_pretrained(model_id)
         if self.tok.pad_token_id is None:
             self.tok.pad_token = self.tok.eos_token
+        # Stop generation at the chat turn-end for Qwen-style chat models, so completions end
+        # after the answer instead of running to max_new_tokens (faster + clean extraction).
+        if "<|im_end|>" in self.tok.get_vocab():
+            self.tok.eos_token = "<|im_end|>"
         torch_dtype = {"auto": "auto", "bf16": torch.bfloat16, "fp16": torch.float16,
                        "fp32": torch.float32}[dtype]
         kwargs = dict(torch_dtype=torch_dtype, device_map=device)
@@ -50,7 +54,8 @@ class HFGenerator:
         ]
         enc = self.tok(texts, return_tensors="pt", padding=True,
                        padding_side="left").to(self.model.device)
-        gen_kwargs = dict(max_new_tokens=max_new_tokens, pad_token_id=self.tok.pad_token_id)
+        gen_kwargs = dict(max_new_tokens=max_new_tokens, pad_token_id=self.tok.pad_token_id,
+                          eos_token_id=self.tok.eos_token_id)
         if temperature and temperature > 0:
             gen_kwargs.update(do_sample=True, temperature=temperature, top_p=0.95)
         else:
