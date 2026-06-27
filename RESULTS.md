@@ -26,6 +26,13 @@ SFT MATH accuracy by level: L1 66.7% · L2 56.8% · L3 41.5% · L4 34.1% · L5 1
 **SFT is the shipped model** — 39–40% is a strong result for a 1.5 B model fine-tuned on a £25
 budget.
 
+### Calculator tool (inference-time)
+The served model is augmented with a **calculator tool** (`mathnano/tools/calculator.py`): a safe,
+AST-based arithmetic engine (no code execution) re-checks every equation the model writes, flags
+slips, and corrects the final answer when it's a wrong direct computation. It targets the model's
+main failure mode — arithmetic errors in otherwise-correct reasoning. Live example: the model output
+`384 × 27 = 10224`; the tool computed 10368 and corrected the answer. Toggle with `MATHNANO_CALC=0`.
+
 ### Why GRPO collapsed the model (an honest, instructive finding)
 GRPO optimises whatever the reward says is good, and our reward signal during GRPO was
 **corrupted by the rollout setup**. On a single 4090 we couldn't run TRL's vLLM rollouts, so we

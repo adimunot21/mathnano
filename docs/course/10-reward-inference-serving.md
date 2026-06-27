@@ -78,6 +78,26 @@ flowchart TD
 One `Generator` and one `math_reward`, reused across training, evaluation, and serving — so the
 model you ship is provably the model you measured, scored by the same correctness rule everywhere.
 
+## 10.45 Tool use: a calculator that corrects the model
+
+The model's main failure mode is *arithmetic slips* in otherwise-correct reasoning (it knows the
+method, fumbles the multiplication). The fix isn't more training — it's **tool use**: let an exact
+calculator do the arithmetic. ▶ `mathnano/tools/calculator.py` reads the model's own solution,
+recomputes every equation it wrote, flags mistakes, and corrects the final answer when it's a wrong
+direct computation. Live example: the model output `384 × 27 = 10224`; the tool computed **10368**
+and corrected the answer.
+
+Two design points worth noting:
+- **It's safe, not code execution.** Each expression is parsed to a Python AST and only numeric
+  arithmetic nodes are evaluated — no names, calls, imports, or builtins ever run. "Running the
+  model's math" with zero ability to run anything dangerous.
+- **It's robust to how models write math** — prose prefixes ("we get 48/2 = 24"), LaTeX operators
+  (`\times`), implicit multiplication (`5(3)`), and equations chained across lines (`= 384*27` then
+  `= 10224`). Each of those was a real case we had to handle.
+
+This is the cheapest large reliability win for a small model, and it generalizes: the next tool is a
+full Python interpreter for multi-step computation (Chapter 12).
+
 ## 10.5 The shape of good product code
 Notice the through-line: one `Generator` interface, one `math_reward`, one model artifact — reused
 across training, eval, and serving. That's not architecture astronautics; it's what guarantees the

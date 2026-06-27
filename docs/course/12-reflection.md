@@ -65,8 +65,9 @@ In rough order of impact:
    win (12.3). This is how "a learning project" becomes "a useful tool."
 3. **Scale within budget** — a larger base (3B–7B) with LoRA, or more SFT data, moves the numbers.
 4. **Serve it properly** — GPU inference, batching, a public HuggingFace Space for a portfolio demo.
-5. **Add capabilities** — tool use (let it call a calculator/Python — huge for arithmetic
-   reliability), longer context, more benchmarks.
+5. **Add capabilities** — tool use is *started*: a calculator tool now verifies and corrects the
+   model's arithmetic at inference (`mathnano/tools/calculator.py` — it caught `384 × 27 = 10224`
+   and corrected the answer to 10368). Next: a full Python/code tool, longer context, more benchmarks.
 
 ## 12.5 The real takeaway
 
