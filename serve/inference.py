@@ -105,7 +105,9 @@ def build_default_solver() -> MathSolver:
         gen = HFGenerator(model_id, adapter=os.environ.get("MATHNANO_ADAPTER"),
                           device=os.environ.get("MATHNANO_DEVICE", "auto"),
                           load_in_4bit=os.environ.get("MATHNANO_4BIT") == "1")
-        return MathSolver(gen, model_name=model_id)
+        # Lower default cap keeps CPU latency reasonable (most solutions fit well under this).
+        max_new = int(os.environ.get("MATHNANO_MAX_NEW_TOKENS", "384"))
+        return MathSolver(gen, model_name=model_id, max_new_tokens=max_new)
     except Exception as e:  # noqa: BLE001
         from mathnano.eval.runner import DummyGenerator
         print(f"[serve] failed to load {model_id} ({e!r}); falling back to dummy.")
