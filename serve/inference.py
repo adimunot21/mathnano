@@ -18,6 +18,30 @@ from typing import Iterator, Optional, Sequence
 from mathnano.eval.runner import DEFAULT_SYSTEM, Generator
 from mathnano.rewards.math_reward import extract_answer
 
+# Chat-turn leak markers: small models sometimes generate past <|im_end|> into a new turn.
+_LEAK_MARKERS = ("<|im_end|>", "<|im_start|>", "\nassistant", "\nuser", "\nsystem")
+
+
+def _clean_solution(text: str) -> str:
+    """Trim trailing rambling so the displayed solution ends at the answer.
+
+    The SFT model occasionally runs past its boxed answer (it doesn't always emit the stop token).
+    We cut at the first chat-turn leak marker, and—since our solutions end with the boxed answer—
+    truncate at the end of the first line containing ``\\boxed{...}``.
+    """
+    cut = len(text)
+    for marker in _LEAK_MARKERS:
+        j = text.find(marker)
+        if j != -1:
+            cut = min(cut, j)
+    text = text[:cut]
+    i = text.find("\\boxed{")
+    if i != -1:
+        nl = text.find("\n", i)
+        if nl != -1:
+            text = text[:nl]
+    return text.strip()
+
 
 @dataclass
 class Solution:
@@ -36,7 +60,8 @@ class MathSolver:
     def solve(self, problem: str, *, temperature: float = 0.0) -> Solution:
         text = self.gen.generate([problem], system=self.system, temperature=temperature,
                                  max_new_tokens=self.max_new_tokens)[0]
-        return Solution(answer=extract_answer(text), solution=text.strip())
+        clean = _clean_solution(text)
+        return Solution(answer=extract_answer(clean), solution=clean)
 
     def chat(self, messages: Sequence[dict], *, temperature: float = 0.0) -> Solution:
         """Single-response chat. We treat the last user turn as the problem.
