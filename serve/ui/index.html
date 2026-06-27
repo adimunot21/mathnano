@@ -26,6 +26,8 @@
   .bot{background:var(--bot);margin-right:8%;border:1px solid var(--line)}
   .answer{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);
           color:var(--accent);font-weight:700;font-size:15px}
+  .calc{margin-top:6px;color:var(--muted);font-size:12.5px}
+  .calc.fix{color:#e3b341}
   .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line);
            border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
            vertical-align:middle;margin-right:8px}
@@ -87,6 +89,12 @@ form.addEventListener('submit',async e=>{
     const data=await res.json();
     let html=esc(data.solution||'(no solution)');
     if(data.answer) html+=`<div class="answer">Answer: ${esc(data.answer)}</div>`;
+    if(data.checked>0){
+      let badge='🧮 calculator: verified '+data.checked+' step'+(data.checked>1?'s':'');
+      if(data.corrected) badge+=' — corrected the answer ('+esc(data.raw_answer)+' → '+esc(data.answer)+')';
+      else if(data.errors>0) badge+=', flagged '+data.errors+' arithmetic slip'+(data.errors>1?'s':'');
+      html+=`<div class="calc${data.corrected||data.errors>0?' fix':''}">${badge}</div>`;
+    }
     bot.innerHTML=html;
     if(window.MathJax&&MathJax.typesetPromise) MathJax.typesetPromise([bot]);
   }catch(err){bot.innerHTML='Error: '+esc(String(err));}

@@ -49,7 +49,12 @@ def create_app(solver: Optional[MathSolver] = None) -> FastAPI:
     @app.post("/solve")
     def solve(req: SolveRequest):
         s = solver.solve(req.problem, temperature=req.temperature)
-        return {"answer": s.answer, "solution": s.solution}
+        calc = s.calc or {}
+        return {
+            "answer": s.answer, "solution": s.solution,
+            "checked": calc.get("n_checked", 0), "errors": calc.get("n_errors", 0),
+            "corrected": bool(calc.get("corrected_answer")), "raw_answer": s.raw_answer,
+        }
 
     @app.post("/chat")
     def chat(req: ChatRequest):

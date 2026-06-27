@@ -18,6 +18,7 @@ from typing import Iterator, Optional, Sequence
 
 from mathnano.eval.runner import DEFAULT_SYSTEM, Generator
 from mathnano.rewards.math_reward import extract_answer
+from mathnano.tools.calculator import check_arithmetic
 
 # Chat-turn leak markers: small models sometimes generate past <|im_end|> into a new turn.
 _LEAK_MARKERS = ("<|im_end|>", "<|im_start|>", "\nassistant", "\nuser", "\nsystem")
@@ -50,21 +51,32 @@ def _clean_solution(text: str) -> str:
 class Solution:
     answer: Optional[str]
     solution: str
+    calc: Optional[dict] = None          # calculator-tool report (checks / corrections)
+    raw_answer: Optional[str] = None     # the model's answer before any calculator correction
 
 
 class MathSolver:
     def __init__(self, generator: Generator, *, system: str = DEFAULT_SYSTEM,
-                 max_new_tokens: int = 512, model_name: str = "unknown"):
+                 max_new_tokens: int = 512, model_name: str = "unknown",
+                 use_calculator: bool = True):
         self.gen = generator
         self.system = system
         self.max_new_tokens = max_new_tokens
         self.model_name = model_name
+        self.use_calculator = use_calculator
 
     def solve(self, problem: str, *, temperature: float = 0.0) -> Solution:
         text = self.gen.generate([problem], system=self.system, temperature=temperature,
                                  max_new_tokens=self.max_new_tokens, stop_on_boxed=True)[0]
         clean = _clean_solution(text)
-        return Solution(answer=extract_answer(clean), solution=clean)
+        raw = extract_answer(clean)
+        if not self.use_calculator:
+            return Solution(answer=raw, solution=clean)
+        # Calculator tool: verify the model's arithmetic and correct the answer if a stated
+        # computation was wrong (the model's main failure mode is arithmetic slips, not reasoning).
+        calc = check_arithmetic(clean)
+        answer = calc["corrected_answer"] or raw
+        return Solution(answer=answer, solution=clean, calc=calc, raw_answer=raw)
 
     def chat(self, messages: Sequence[dict], *, temperature: float = 0.0) -> Solution:
         """Single-response chat. We treat the last user turn as the problem.
@@ -107,7 +119,9 @@ def build_default_solver() -> MathSolver:
                           load_in_4bit=os.environ.get("MATHNANO_4BIT") == "1")
         # Lower default cap keeps CPU latency reasonable (most solutions fit well under this).
         max_new = int(os.environ.get("MATHNANO_MAX_NEW_TOKENS", "384"))
-        return MathSolver(gen, model_name=model_id, max_new_tokens=max_new)
+        use_calc = os.environ.get("MATHNANO_CALC", "1") != "0"
+        return MathSolver(gen, model_name=model_id, max_new_tokens=max_new,
+                          use_calculator=use_calc)
     except Exception as e:  # noqa: BLE001
         from mathnano.eval.runner import DummyGenerator
         print(f"[serve] failed to load {model_id} ({e!r}); falling back to dummy.")
