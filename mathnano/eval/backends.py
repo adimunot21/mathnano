@@ -46,7 +46,8 @@ class HFGenerator:
         self.model.eval()
 
     def generate(self, prompts: Sequence[str], *, system: str = DEFAULT_SYSTEM,
-                 temperature: float = 0.0, max_new_tokens: int = 512) -> list[str]:
+                 temperature: float = 0.0, max_new_tokens: int = 512,
+                 stop_on_boxed: bool = False, **_) -> list[str]:
         import torch
 
         texts = [
@@ -63,6 +64,22 @@ class HFGenerator:
             gen_kwargs.update(do_sample=True, temperature=temperature, top_p=0.95)
         else:
             gen_kwargs.update(do_sample=False)
+        # The small SFT model often doesn't emit the stop token, so it runs to max_new_tokens
+        # (slow on CPU). Stop as soon as a complete \boxed{...} answer is produced. Used by the
+        # product (batch=1); eval leaves it off (batched decode-per-step is too costly).
+        if stop_on_boxed:
+            from transformers import StoppingCriteria, StoppingCriteriaList
+            tok, plen = self.tok, enc["input_ids"].shape[1]
+
+            class _StopOnBoxed(StoppingCriteria):
+                def __call__(self, input_ids, scores, **kw):
+                    done = []
+                    for row in input_ids:
+                        txt = tok.decode(row[plen:], skip_special_tokens=True)
+                        done.append("\\boxed{" in txt and "}" in txt.split("\\boxed{", 1)[1])
+                    return torch.tensor(done, dtype=torch.bool, device=input_ids.device)
+
+            gen_kwargs["stopping_criteria"] = StoppingCriteriaList([_StopOnBoxed()])
         with torch.no_grad():
             out = self.model.generate(**enc, **gen_kwargs)
         # strip the prompt tokens; decode only the newly generated continuation

@@ -66,7 +66,8 @@ class DummyGenerator:
     def __init__(self, oracle: Optional[Callable[[str], str]] = None):
         self.oracle = oracle or (lambda p: "I think the answer is \\boxed{0}.")
 
-    def generate(self, prompts, *, system=DEFAULT_SYSTEM, temperature=0.0, max_new_tokens=512):
+    def generate(self, prompts, *, system=DEFAULT_SYSTEM, temperature=0.0, max_new_tokens=512,
+                 **_):
         return [self.oracle(p) for p in prompts]
 
 

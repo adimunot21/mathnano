@@ -62,7 +62,7 @@ class MathSolver:
 
     def solve(self, problem: str, *, temperature: float = 0.0) -> Solution:
         text = self.gen.generate([problem], system=self.system, temperature=temperature,
-                                 max_new_tokens=self.max_new_tokens)[0]
+                                 max_new_tokens=self.max_new_tokens, stop_on_boxed=True)[0]
         clean = _clean_solution(text)
         return Solution(answer=extract_answer(clean), solution=clean)
 
