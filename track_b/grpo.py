@@ -74,6 +74,8 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=-1)
     ap.add_argument("--num-generations", type=int, default=CONFIG["num_generations"])
     ap.add_argument("--per-device-batch", type=int, default=CONFIG["per_device_batch"])
+    ap.add_argument("--max-completion-len", type=int, default=CONFIG["max_completion_len"],
+                    help="hard cap on generated tokens (backstop if the model doesn't emit eos)")
     ap.add_argument("--no-vllm", action="store_true", help="use HF generation instead of vLLM")
     ap.add_argument("--vllm-mem", type=float, default=0.3, help="vLLM GPU memory fraction")
     args = ap.parse_args()
@@ -86,6 +88,11 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(args.base)
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
+    # TRL drives generation off the TOKENIZER's eos. Qwen's default eos is <|endoftext|>, which the
+    # SFT model rarely emits — so rollouts ran to max length. Point eos at the chat turn-end so
+    # completions stop right after the answer (faster + clean extraction). pad stays distinct.
+    if "<|im_end|>" in tok.get_vocab():
+        tok.eos_token = "<|im_end|>"
 
     # Build the dataset: conversational prompt + the ground-truth answer column for the reward.
     raw = load_dataset("json", data_files=args.data, split="train")
@@ -129,7 +136,7 @@ def main() -> None:
         beta=CONFIG["beta"],
         temperature=CONFIG["temperature"],
         max_prompt_length=CONFIG["max_prompt_len"],
-        max_completion_length=CONFIG["max_completion_len"],
+        max_completion_length=args.max_completion_len,
         max_steps=args.max_steps,
         num_train_epochs=1,
         logging_steps=1,
