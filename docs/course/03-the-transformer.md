@@ -74,6 +74,19 @@ out     = weights @ V                # (T, d_head): each position's attended sum
 - `softmax` turns scores into weights that sum to 1.
 - `weights @ V` mixes the Values accordingly.
 
+```mermaid
+flowchart LR
+  x["stream x (B,T,d)"] --> Q["Q"]
+  x --> K["K"]
+  x --> V["V"]
+  Q --> SC["scores = Q.K^T / sqrt(d_head)"]
+  K --> SC
+  SC --> MK["causal mask<br/>(hide future)"]
+  MK --> W["softmax<br/>attention weights"]
+  W --> O["out = weights . V"]
+  V --> O
+```
+
 ### The causal mask: no peeking at the future
 We're training the model to predict the *next* token. If position 3 could attend to position 4, it
 would be cheating — at generation time, token 4 doesn't exist yet. So we **mask** the upper triangle

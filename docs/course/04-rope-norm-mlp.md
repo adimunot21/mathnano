@@ -80,6 +80,19 @@ x = x + attention(rmsnorm(x))   # communicate between tokens (+ RoPE, QK-norm in
 x = x + mlp(rmsnorm(x))         # think per token
 ```
 
+```mermaid
+flowchart TD
+  xin["x (residual stream)"] --> n1["RMSNorm"]
+  n1 --> at["Attention<br/>(+RoPE, QK-norm)"]
+  at --> p1(("+"))
+  xin --> p1
+  p1 --> n2["RMSNorm"]
+  n2 --> mlp["MLP (relu^2)"]
+  mlp --> p2(("+"))
+  p1 --> p2
+  p2 --> xout["x out"]
+```
+
 A model is just `N` of these stacked, then a final norm and the unembedding to vocabulary scores.
 **Depth** = `N`. ▶ In MathNano, "depth-16" literally means 16 of these blocks; nanochat derives all
 other dimensions (width, heads, learning rates, training length) from that single number using
@@ -92,6 +105,15 @@ ids (B,T) -> embed -> (B,T,d) -> [block]×N -> final norm -> unembed -> logits (
 Note the output is a distribution at **every** position at once (not just the last) — during training
 that lets us learn from all `T` next-token predictions in one pass; during generation we only use
 the last position's distribution.
+
+```mermaid
+flowchart TD
+  ids["token ids (B,T)"] --> emb["embedding (B,T,d)"]
+  emb --> blocks["N transformer blocks<br/>(attention + MLP, residual)"]
+  blocks --> fn["final RMSNorm"]
+  fn --> un["unembed -> logits (B,T,V)"]
+  un --> sm["softmax -> next-token probabilities"]
+```
 
 ## What breaks without this
 - No **positional encoding**: the model is word-order-blind — "man bites dog" and "dog bites man"

@@ -30,6 +30,17 @@ Repeat for millions of batches. That's it — the whole of "learning" is iterate
 residual connections (Chapter 3) matter here: they give the gradient a direct path back through
 every layer, so even deep models get a clean training signal.
 
+```mermaid
+flowchart LR
+  B["batch of tokens"] --> F["forward pass"]
+  F --> L["cross-entropy loss"]
+  L --> BW["backprop -> gradients"]
+  BW --> AC{"accumulated<br/>N micro-batches?"}
+  AC -->|no| B
+  AC -->|yes| OPT["optimizer step<br/>(Muon + AdamW)"]
+  OPT --> B
+```
+
 ## 5.3 Optimizers: AdamW (and Muon)
 
 Plain gradient descent is noisy. **AdamW** — the standard — keeps running averages of each

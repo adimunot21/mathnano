@@ -48,6 +48,15 @@ This loop is **autoregressive generation** — each output becomes part of the n
 generation is sequential and why long outputs are slow (more on speeding this up — the *KV cache* —
 in [Chapter 10](10-reward-inference-serving.md)).
 
+```mermaid
+flowchart LR
+  P["tokens so far"] --> M["model"]
+  M --> D["distribution over<br/>next token"]
+  D --> S["pick one<br/>(greedy / sample)"]
+  S --> A["append it"]
+  A -->|repeat| P
+```
+
 **Temperature** controls step 2's randomness. Temperature 0 = always take the most likely token
 (deterministic, "greedy"). Higher temperature flattens the distribution → more diverse, more
 creative, more error-prone. ▶ In MathNano we eval at temperature 0 (we want the model's best single

@@ -18,6 +18,25 @@ into something useful). Part 3 is the engineering (how you measure and ship it).
 honest reflection. Each chapter ends with **"What breaks without this"** — the fastest way to
 understand why a component exists is to know what fails when it's gone.
 
+## The whole project at a glance
+
+```mermaid
+flowchart LR
+  D1[("MathPile<br/>raw math text")] --> PT["Pretrain<br/>(next-token prediction)"]
+  PT --> M1["Base model<br/>speaks math"]
+  M1 --> SFT["SFT<br/>(imitate solutions)"]
+  D2[("Q&A pairs<br/>GSM8K / MATH / OMI")] --> SFT
+  SFT --> M2["SFT model<br/>solves + formats<br/>(39% / 40%)"]
+  M2 --> RL["GRPO<br/>(verifiable reward)"]
+  D3[("Problems +<br/>verified answers")] --> RL
+  RL --> M3["RL model<br/>(collapsed - see ch.8)"]
+  M2 --> SV["FastAPI + web UI"]
+  SV --> U((User))
+```
+
+The three blue stages — **pretrain → SFT → RL** — are the recipe behind every modern chat model;
+the rest of the diagram is data feeding in and the product coming out. Each is a chapter below.
+
 ## Contents
 
 **Part 1 — The machine: how an LLM works**

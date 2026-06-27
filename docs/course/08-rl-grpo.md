@@ -33,6 +33,16 @@ problem:
 4. **Update the policy** to make above-average solutions *more* likely and below-average ones *less*
    likely.
 
+```mermaid
+flowchart TD
+  P["one problem"] --> G["sample G solutions<br/>(temperature > 0)"]
+  G --> R["score each with the<br/>verifiable reward (+1 / -1)"]
+  R --> A["advantage_i = r_i - mean(r)"]
+  A --> U["update policy:<br/>make above-average attempts<br/>more likely, below-average less"]
+  U --> KL["KL penalty keeps it<br/>near the SFT model"]
+  KL -->|next problem| P
+```
+
 The "group relative" trick is what makes it simple and stable: you don't need an absolute reward
 scale or a separate value network — you just ask "which of these attempts were better than the
 group's average?" A small **KL penalty** keeps the updated model from drifting too far from the SFT

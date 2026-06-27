@@ -64,6 +64,20 @@ variables (`MATHNANO_MODEL`, `MATHNANO_ADAPTER`, `MATHNANO_DEVICE`). It runs on 
 on a laptop) or GPU (instant), and there's a Dockerfile for deployment. A `DummyGenerator` lets the
 whole API be tested with no model at all (fast, dependency-free CI).
 
+```mermaid
+flowchart TD
+  HF["HFGenerator<br/>(transformers)"] -.implements.-> GEN["Generator interface<br/>.generate(prompts)"]
+  DUM["DummyGenerator<br/>(tests)"] -.implements.-> GEN
+  GEN --> EV["Eval harness"]
+  GEN --> SV["Serving API + UI"]
+  RW["math_reward<br/>(extract + check)"] --> EV
+  RW --> RL["GRPO training"]
+  RW --> SV
+```
+
+One `Generator` and one `math_reward`, reused across training, evaluation, and serving — so the
+model you ship is provably the model you measured, scored by the same correctness rule everywhere.
+
 ## 10.5 The shape of good product code
 Notice the through-line: one `Generator` interface, one `math_reward`, one model artifact — reused
 across training, eval, and serving. That's not architecture astronautics; it's what guarantees the
