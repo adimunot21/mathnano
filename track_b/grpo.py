@@ -106,6 +106,17 @@ def main() -> None:
         model = merged
         print(f"[grpo] merged SFT adapter {args.sft_adapter} into base")
 
+    # Stop rollouts at Qwen's chat turn-end (<|im_end|>) so completions end after the answer
+    # instead of running to max_completion_length. WHY: the model's default eos is <|endoftext|>,
+    # which the SFT model rarely emits — without this, every generation hits 512 tokens (slow,
+    # and the answer extractor can grab rambled text after the real answer).
+    im_end_id = tok.convert_tokens_to_ids("<|im_end|>")
+    if im_end_id is not None and not isinstance(model, str):
+        stops = sorted({tok.eos_token_id, im_end_id} - {None})
+        model.generation_config.eos_token_id = stops
+        model.config.eos_token_id = stops
+        print(f"[grpo] generation stop tokens: {stops}")
+
     lora = LoraConfig(r=CONFIG["lora_r"], lora_alpha=CONFIG["lora_alpha"],
                       target_modules="all-linear", bias="none", task_type="CAUSAL_LM")
 
