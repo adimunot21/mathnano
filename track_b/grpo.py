@@ -19,6 +19,12 @@ Usage (in the Track B venv, from repo root so `mathnano` imports):
 from __future__ import annotations
 
 import argparse
+import os
+import sys
+
+# Make `mathnano` importable when run as `python track_b/grpo.py` (script dir, not repo root,
+# is what Python puts on sys.path by default).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mathnano.rewards.math_reward import math_reward  # shared verifiable reward
 
