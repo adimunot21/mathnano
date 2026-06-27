@@ -60,6 +60,10 @@ def safe_arith(expr: str) -> Optional[float]:
 # LaTeX / unicode math -> python-arithmetic
 def _normalize(text: str) -> str:
     t = text
+    # Merge chained equations split across lines ("...= 384 * 27\n= 10224") into one line, so the
+    # whole `a = b = c` chain is checkable. Also handle LaTeX align separators (& and \\).
+    t = t.replace("&=", "=").replace(r"\\", "\n")
+    t = re.sub(r"\n\s*=", " = ", t)
     t = t.replace(r"\times", "*").replace(r"\cdot", "*").replace(r"\div", "/")
     t = t.replace("×", "*").replace("÷", "/").replace("·", "*")
     t = t.replace(r"\left", "").replace(r"\right", "").replace(r"\,", "")

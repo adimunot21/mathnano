@@ -50,6 +50,14 @@ def test_skips_symbolic_steps():
     assert r["n_errors"] == 0
 
 
+def test_multiline_chained_equation_is_corrected():
+    # the model splits the equation across lines and gets the product wrong (384*27 = 10368)
+    sol = ("Total = widgets * days\n= 384 * 27\n= 10224.\nSo \\boxed{10224}")
+    r = check_arithmetic(sol)
+    assert r["n_errors"] == 1
+    assert r["corrected_answer"] == "10368"
+
+
 def test_no_equations():
     r = check_arithmetic("The answer is forty-two.")
     assert r["n_checked"] == 0 and r["corrected_answer"] is None
