@@ -30,6 +30,9 @@ class HFGenerator:
             self.tok.eos_token = "<|im_end|>"
         torch_dtype = {"auto": "auto", "bf16": torch.bfloat16, "fp16": torch.float16,
                        "fp32": torch.float32}[dtype]
+        # CPU: bf16 is slow/unsupported on many CPUs — use fp32 there.
+        if device == "cpu" and dtype == "auto":
+            torch_dtype = torch.float32
         kwargs = dict(torch_dtype=torch_dtype, device_map=device)
         if load_in_4bit:
             from transformers import BitsAndBytesConfig

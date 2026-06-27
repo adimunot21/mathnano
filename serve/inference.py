@@ -75,6 +75,7 @@ def build_default_solver() -> MathSolver:
     try:
         from mathnano.eval.backends import HFGenerator
         gen = HFGenerator(model_id, adapter=os.environ.get("MATHNANO_ADAPTER"),
+                          device=os.environ.get("MATHNANO_DEVICE", "auto"),
                           load_in_4bit=os.environ.get("MATHNANO_4BIT") == "1")
         return MathSolver(gen, model_name=model_id)
     except Exception as e:  # noqa: BLE001
