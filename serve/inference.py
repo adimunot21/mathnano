@@ -12,6 +12,7 @@ so the server (and UI) always boot for development.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Iterator, Optional, Sequence
 
@@ -40,6 +41,8 @@ def _clean_solution(text: str) -> str:
         nl = text.find("\n", i)
         if nl != -1:
             text = text[:nl]
+    # Strip trailing decode-leak junk (CJK / replacement chars) the model emits past its answer.
+    text = re.sub(r"[一-鿿　-〿�\s]+$", "", text)
     return text.strip()
 
 
